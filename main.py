@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
@@ -580,7 +580,7 @@ aCtive = {}
 tOkens = {}
 
 
-# ==================== محرك الإرسال (محمي لمنع الحظر / الباند) ====================
+# ==================== محرك الإرسال (سريع وبدون وقت انتظار كبير) ====================
 def single_account_worker(uid, pw, tgt, ev):
   global tOkens
   while not ev.is_set():
@@ -589,23 +589,22 @@ def single_account_worker(uid, pw, tgt, ev):
         tOkens[uid] = gJ(uid, pw)
       jwt = tOkens[uid]
       code = aF(jwt, tgt)
-      
-      # حماية ذكية: إذا استاب السيرفر خطأ حظر مؤقت أو فشل مصادقة، يتم تحديث التوكن أو إبطاء الطلب
+
       if code in (401, 403):
         tOkens[uid] = gJ(uid, pw)
         jwt = tOkens[uid]
         aF(jwt, tgt)
-      elif code == 429: # كود كثرة الطلبات (Rate Limit) لتفادي الباند
-        time.sleep(random.uniform(2.0, 4.0))
+      elif code == 429:
+        time.sleep(1.0)
 
       with stats_lock:
         REQUEST_STATS["total_sent"] += 1
-        
-      # إضافة فاصل زمني عشوائي خفيف لمنع كشف السكربت وحماية الحسابات من الباند
-      time.sleep(random.uniform(0.3, 0.8))
+
+      # سرعة عالية جداً بدون فترات انتظار طويلة
+      time.sleep(0.05)
     except:
       tOkens.pop(uid, None)
-      time.sleep(1.0)
+      time.sleep(0.5)
 
 
 def sPam(tgt):
@@ -613,18 +612,18 @@ def sPam(tgt):
   if not ev:
     return
 
-  threads = []
-  for uid, pw in aCcs.items():
-    t = threading.Thread(
-        target=single_account_worker, args=(uid, pw, tgt, ev), daemon=True
-    )
-    threads.append(t)
-    t.start()
-    # تأخير زمني بسيط بين إقلاع كل حساب وآخر لمنع حدوث ضغط مفاجئ يسبب باند جماعي
-    time.sleep(0.05)
+  max_workers = min(len(aCcs), 40)
+  with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    futures = [
+        executor.submit(single_account_worker, uid, pw, tgt, ev)
+        for uid, pw in aCcs.items()
+    ]
 
-  while not ev.is_set():
-    time.sleep(0.1)
+    while not ev.is_set():
+      time.sleep(0.5)
+
+    for f in futures:
+      f.cancel()
 
   aCtive.pop(tgt, None)
   save_targets_to_file()
@@ -639,7 +638,8 @@ def restore_targets():
       threading.Thread(target=sPam, args=(uid,), daemon=True).start()
   if saved_list:
     print(
-        f"⚡ تم استعادة واستئناف الهجوم للآيدات النشطة لـ {len(saved_list)} أهداف بنجاح!"
+        f"⚡ تم استعادة واستئناف الهجوم للآيدات النشطة لـ {len(saved_list)} أهداف"
+        " بنجاح!"
     )
 
 
@@ -650,9 +650,9 @@ def restore_targets():
 def send_welcome(message):
   hide_keyboard = types.ReplyKeyboardRemove()
   help_text = (
-      "⚡ **لوحة السيطرة المحمية من الباند (SAFE ULTRA PANEL)** 🔥\n\n"
+      "⚡ **لوحة السيطرة السريعة (ULTRA SPEED PANEL)** 🔥\n\n"
       "🚀 **قائمة الأوامر السريعة:**\n"
-      "🎯 `/spam <UID>` - إطلاق الهجوم الآمن بجميع الحسابات معاً\n"
+      "🎯 `/spam <UID>` - إطلاق الهجوم السريع بجميع الحسابات\n"
       "🛑 `/stop <UID>` - إيقاف الهجوم عن الآيدي فوراً\n"
       "📊 `/speed` - عرض عدد الطلبات المرسلة وسرعة الخادم\n"
       "📋 `/status` - عرض الأهداف المشتعلة حالياً\n"
@@ -670,7 +670,9 @@ def send_welcome(message):
 def cmd_ping(message):
   start_time = time.time()
   msg = bot.reply_to(
-      message, "📡 **جاري قياس البينج الحقيقي وسرعة الاستجابة...**", parse_mode="Markdown"
+      message,
+      "📡 **جاري قياس البينج الحقيقي وسرعة الاستجابة...**",
+      parse_mode="Markdown",
   )
   latency = int((time.time() - start_time) * 1000)
   try:
@@ -684,7 +686,7 @@ def cmd_ping(message):
       (
           "📶 **تقرير مؤشر السرعة الحقيقي:**\n\n🤖 **استجابة البوت (Telegram):**"
           f" `{latency} ms`\n🌐 **استجابة سيرفر اللعبة (API):** `{api_latency}"
-          " ms`\n⚡ **الحالة:** الحماية مفعلة والسرعة مستقرة!"
+          " ms`\n⚡ **الحالة:** السرعة القصوى مفعلة!"
       ),
       chat_id=message.chat.id,
       message_id=msg.message_id,
@@ -711,9 +713,7 @@ def cmd_speed(message):
 def cmd_dev(message):
   bot.reply_to(
       message,
-      (
-          "👑 **معلومات المطور:**\n\n👤 **المطور:** Protected Engine\n🔥 **الحالة:** محمي ضد الباند"
-      ),
+      "👑 **معلومات المطور:**\n\n👤 **المطور:** Ultra Speed Engine",
       parse_mode="Markdown",
   )
 
@@ -746,7 +746,9 @@ def cmd_accounts(message):
 @bot.message_handler(commands=["status"])
 def cmd_status(message):
   if not aCtive:
-    bot.reply_to(message, "💤 **لا توجد أي أهداف مستهدفة حالياً.**", parse_mode="Markdown")
+    bot.reply_to(
+        message, "💤 **لا توجد أي أهداف مستهدفة حالياً.**", parse_mode="Markdown"
+    )
     return
   text = "🎯 **قائمة الأهداف المشتعلة حالياً:**\n\n"
   for uid in aCtive.keys():
@@ -769,13 +771,23 @@ def cmd_spam(message):
     bot.reply_to(message, "❌ **خطأ:** الآيدي يجب أن يكون أرقاماً فقط!")
     return
   if uid in aCtive:
-    bot.reply_to(message, f"⚠️ **تنبيه:** الآيدي `{uid}` تحت الهجوم بالفعل!", parse_mode="Markdown")
+    bot.reply_to(
+        message,
+        f"⚠️ **تنبيه:** الآيدي `{uid}` تحت الهجوم بالفعل!",
+        parse_mode="Markdown",
+    )
     return
   if not aCcs:
-    bot.reply_to(message, "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ!", parse_mode="Markdown")
+    bot.reply_to(
+        message, "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ!", parse_mode="Markdown"
+    )
     return
 
-  wait_msg = bot.reply_to(message, f"🔍 **جاري فحص وتشغيل الحسابات بشكل آمن للآيدي `{uid}`...**", parse_mode="Markdown")
+  wait_msg = bot.reply_to(
+      message,
+      f"🔍 **جاري فحص وتشغيل الحسابات بسرعة عالية للآيدي `{uid}`...**",
+      parse_mode="Markdown",
+  )
   player_name = "مقاتل فري فاير"
   try:
     first_uid = list(aCcs.keys())[0]
@@ -793,16 +805,20 @@ def cmd_spam(message):
   try:
     bot.edit_message_text(
         (
-            "🚀 **تم بدء الهجوم الآمن والمحمي بكافة الحسابات بنجاح!**\n\n👤 **الاسم:**"
-            f" `{player_name}`\n🎯 **الآيدي:** `{uid}`\n👥 **عدد الحسابات"
-            f" المستخدمة:** `{len(aCcs)}`"
+            "🚀 **تم بدء الهجوم السارق والطلقات المتتالية بكافة الحسابات"
+            f" بنجاح!**\n\n👤 **الاسم:** `{player_name}`\n🎯 **الآيدي:**"
+            f" `{uid}`\n👥 **عدد الحسابات المستخدمة:** `{len(aCcs)}`"
         ),
         chat_id=message.chat.id,
         message_id=wait_msg.message_id,
         parse_mode="Markdown",
     )
   except:
-    bot.reply_to(message, f"🚀 **تم بدء الهجوم الشامل الآمن على الآيدي:** `{uid}`", parse_mode="Markdown")
+    bot.reply_to(
+        message,
+        f"🚀 **تم بدء الهجوم السريع على الآيدي:** `{uid}`",
+        parse_mode="Markdown",
+    )
 
 
 @bot.message_handler(commands=["stop"])
@@ -812,14 +828,17 @@ def cmd_stop(message):
     bot.reply_to(message, "⚠️ **خطأ:** `/stop <UID>`", parse_mode="Markdown")
     return
   uid = parts[1].strip()
-  
+
   if uid in aCtive:
     aCtive[uid].set()
     save_targets_to_file()
-    bot.reply_to(message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown")
+    bot.reply_to(
+        message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown"
+    )
   else:
-    bot.reply_to(message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown")
-
+    bot.reply_to(
+        message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown"
+    )
 
 
 # ==================== مسارات الـ Flask ====================
@@ -837,7 +856,7 @@ def sTart():
   aCtive[uid] = ev
   threading.Thread(target=sPam, args=(uid,), daemon=True).start()
   save_targets_to_file()
-  return jsonify({"status": True, "msg": "Safe Turbo Attack Started"})
+  return jsonify({"status": True, "msg": "Ultra Turbo Attack Started"})
 
 
 @app.get("/stop")
@@ -851,7 +870,7 @@ def sTop():
 
 
 def run_telegram_bot():
-  print("🚀 Safe Turbo Telegram Bot is running live...")
+  print("🚀 Ultra Speed Telegram Bot is running live...")
   while True:
     try:
       bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
