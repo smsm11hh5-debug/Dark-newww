@@ -812,13 +812,14 @@ def cmd_stop(message):
     bot.reply_to(message, "⚠️ **خطأ:** `/stop <UID>`", parse_mode="Markdown")
     return
   uid = parts[1].strip()
-  if uid in aCtivity_check := aCtive: # type: ignore
-    if uid in aCtive:
-      aCtive[uid].set()
-      save_targets_to_file()
-      bot.reply_to(message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown")
-      return
-  bot.reply_to(message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown")
+  
+  if uid in aCtive:
+    aCtive[uid].set()
+    save_targets_to_file()
+    bot.reply_to(message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown")
+  else:
+    bot.reply_to(message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown")
+
 
 
 # ==================== مسارات الـ Flask ====================
