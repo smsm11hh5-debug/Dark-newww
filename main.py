@@ -29,7 +29,7 @@ except Exception as e:
   print(f"Error reading config.json: {e}")
 
 if not TELEGRAM_TOKEN:
-  print("⚠️ تنبيه: توكن البوت مفقود، تأكد من ملف config.json!")
+  print("⚠️ تنبيه: توكن البوت مفقود، تأكد من ملف config.json أو متغيرات البيئة!")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
@@ -67,11 +67,6 @@ def eNc(d):
   return cipher.encrypt(pad(d, AES.block_size))
 
 
-def dEc(d):
-  cipher = AES.new(k, AES.MODE_CBC, iv)
-  return unpad(cipher.decrypt(d), AES.block_size)
-
-
 def pB(d):
   i, out = 0, {}
   while i < len(d):
@@ -101,16 +96,6 @@ def pB(d):
         out[str(fn)] = {"t": "str", "v": v.decode()}
       except:
         out[str(fn)] = {"t": "hex", "v": v.hex()}
-    elif wt == 1:
-      if i + 8 > len(d):
-        break
-      out[str(fn)] = {"t": "64b", "v": d[i : i + 8].hex()}
-      i += 8
-    elif wt == 5:
-      if i + 4 > len(d):
-        break
-      out[str(fn)] = {"t": "32b", "v": d[i : i + 4].hex()}
-      i += 4
     else:
       break
   return out
@@ -595,7 +580,7 @@ aCtive = {}
 tOkens = {}
 
 
-# ==================== محرك الإرسال فائق السرعة (ThreadPool) ====================
+# ==================== محرك الإرسال فائق السرعة اللحظي ====================
 def worker_task(uid, pw, tgt, ev):
   global tOkens
   while not ev.is_set():
@@ -605,7 +590,7 @@ def worker_task(uid, pw, tgt, ev):
       jwt = tOkens[uid]
       code = aF(jwt, tgt)
       if code in (401, 403):
-        tOkens[uid] = gJ(uid, pw)  # تجديد التوكن فوراً إذا انتهى
+        tOkens[uid] = gJ(uid, pw)
         jwt = tOkens[uid]
         aF(jwt, tgt)
 
@@ -613,19 +598,21 @@ def worker_task(uid, pw, tgt, ev):
         REQUEST_STATS["total_sent"] += 1
     except:
       tOkens.pop(uid, None)
-    # لا يوجد أي وقت انتظار (Zero Delay) لضمان أقصى سرعة
+    # إرسال متواصل ومكثف بدون أي فواصل أو تأخير
 
 
 def sPam(tgt):
-  ev = aCtive[tgt]
-  # استخدام ThreadPoolExecutor لتشغيل جميع الحسابات في نفس اللحظة بدون تأخير
-  with ThreadPoolExecutor(max_workers=max(1, len(aCcs))) as executor:
+  ev = aCtive.get(tgt)
+  if not ev:
+    return
+  # تشغيل الحسابات كحلقة لا نهائية متوازية وبأقصى عدد للـ Threads
+  with ThreadPoolExecutor(max_workers=max(5, len(aCcs) * 2)) as executor:
     futures = [
         executor.submit(worker_task, uid, pw, tgt, ev)
         for uid, pw in aCcs.items()
     ]
     while not ev.is_set():
-      time.sleep(0.5)
+      time.sleep(0.1)
     for f in futures:
       f.cancel()
   aCtive.pop(tgt, None)
@@ -645,7 +632,7 @@ def restore_targets():
     )
 
 
-# ==================== الأوامر والواجهة الجديدة ====================
+# ==================== الأوامر والواجهة ====================
 
 
 @bot.message_handler(commands=["start", "help"])
@@ -656,13 +643,12 @@ def send_welcome(message):
       "🚀 **قائمة الأوامر السريعة:**\n"
       "🎯 `/spam <UID>` - إطلاق الهجوم فائق السرعة بكل الحسابات\n"
       "🛑 `/stop <UID>` - إيقاف الهجوم عن الآيدي فوراً\n"
-      "📊 `/speed` - عرض عدد الطلبات التي تم إرسالها وسرعة الخادم\n"
+      "📊 `/speed` - عرض عدد الطلبات المرسلة وسرعة الخادم\n"
       "📋 `/status` - عرض الأهداف المشتعلة حالياً\n"
       "📂 `/accounts` - عدد الحسابات وجاهزيتها\n"
       "📶 `/ping` - قياس البينج الحقيقي للسيرفر\n"
       "👑 `/dev` - معلومات المطور (skip)\n"
-      "🔄 `/restart` - تنظيف الذاكرة وتصفير النظام\n\n"
-      "✨ *ميزة جديدة: السكربت يعمل بدون أي فواصل زمنية وبقوة تدميرية قصوى.*"
+      "🔄 `/restart` - تنظيف الذاكرة وتصفير النظام"
   )
   bot.reply_to(
       message, help_text, reply_markup=hide_keyboard, parse_mode="Markdown"
@@ -675,24 +661,20 @@ def cmd_ping(message):
   msg = bot.reply_to(
       message, "📡 **جاري قياس البينج الحقيقي وسرعة الاستجابة...**", parse_mode="Markdown"
   )
-  end_time = time.time()
-  latency = int((end_time - start_time) * 1000)
-
-  api_ping_start = time.time()
+  latency = int((time.time() - start_time) * 1000)
   try:
+    api_p_start = time.time()
     requests.get(sRv, timeout=2, verify=False)
-    api_latency = int((time.time() - api_ping_start) * 1000)
+    api_latency = int((time.time() - api_p_start) * 1000)
   except:
     api_latency = "غير متصل"
 
-  response_text = (
-      "📶 **تقرير مؤشر السرعة الحقيقي:**\n\n"
-      f"🤖 **استجابة البوت (Telegram):** `{latency} ms`\n"
-      f"🌐 **استجابة سيرفر اللعبة (API):** `{api_latency} ms`\n"
-      "⚡ **الحالة:** السرعة قصوى ولا يوجد أي تأخير!"
-  )
   bot.edit_message_text(
-      response_text,
+      (
+          "📶 **تقرير مؤشر السرعة الحقيقي:**\n\n🤖 **استجابة البوت (Telegram):**"
+          f" `{latency} ms`\n🌐 **استجابة سيرفر اللعبة (API):** `{api_latency}"
+          " ms`\n⚡ **الحالة:** السرعة أقصى ما يمكن!"
+      ),
       chat_id=message.chat.id,
       message_id=msg.message_id,
       parse_mode="Markdown",
@@ -703,24 +685,27 @@ def cmd_ping(message):
 def cmd_speed(message):
   with stats_lock:
     total = REQUEST_STATS["total_sent"]
-  text = (
-      "🚀 **مؤشر السرعة والأداء اللحظي:**\n\n"
-      f"🔥 **إجمالي الطلبات المرسلة للهدف:** `{total}` طلب ناجح\n"
-      f"⚡ **معدل الإرسال:** بلا حدود (Zero-Delay Threading)\n"
-      f"👥 **الحسابات النشطة في الهجوم:** `{len(aCcs)}` حساب"
+  bot.reply_to(
+      message,
+      (
+          "🚀 **مؤشر السرعة والأداء اللحظي:**\n\n🔥 **إجمالي الطلبات المرسلة"
+          f" للهدف:** `{total}` طلب ناجح\n⚡ **معدل الإرسال:** فائق السرعة"
+          f" (Zero-Delay)\n👥 **الحسابات النشطة:** `{len(aCcs)}`"
+      ),
+      parse_mode="Markdown",
   )
-  bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["dev"])
 def cmd_dev(message):
-  text = (
-      "👑 **معلومات المطور:**\n\n"
-      "👤 **المطور الصانع:** skip\n"
-      "🔥 **الإصدار:** Turbo Multi-Threaded v4.0\n"
-      "🛡️ **الحالة:** يعمل بكامل القوة والتوزيع المتوازي."
+  bot.reply_to(
+      message,
+      (
+          "👑 **معلومات المطور:**\n\n👤 **المطور:** skip\n🔥 **الإصدار:** Ultra"
+          " Turbo v4.1"
+      ),
+      parse_mode="Markdown",
   )
-  bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["restart"])
@@ -731,35 +716,28 @@ def cmd_restart_bot(message):
     os.remove(TARGETS_FILE)
   bot.reply_to(
       message,
-      "🔄 **تم إعادة تشغيل وتصفير النظام بالكامل!**\n🧹 تم مسح كافة الأهداف والذاكرة بنجاح.",
+      "🔄 **تم إعادة تشغيل وتصفير النظام بالكامل!**",
       parse_mode="Markdown",
   )
 
 
 @bot.message_handler(commands=["accounts"])
 def cmd_accounts(message):
-  total = len(aCcs)
-  active = len([uid for uid in aCcs if uid in tOkens])
-
-  text = (
-      "📊 **إحصائيات الحسابات المتاحة:**\n\n"
-      f"📂 **إجمالي الحسابات:** `{total}`\n"
-      f"🟢 **الحسابات المفعلة وجاهزة للضرب:** `{active}`\n"
-      "⚡ **جميع الحسابات تطلق الطلبات معاً في نفس اللحظة.**"
+  bot.reply_to(
+      message,
+      (
+          "📊 **إحصائيات الحسابات:**\n\n📂 **إجمالي الحسابات:**"
+          f" `{len(aCcs)}`\n🟢 **المفعلة والجاهزة:** `{len(tOkens)}`"
+      ),
+      parse_mode="Markdown",
   )
-  bot.reply_to(message, text, parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["status"])
 def cmd_status(message):
   if not aCtive:
-    bot.reply_to(
-        message,
-        "💤 **لا توجد أي أهداف مستهدفة حالياً.**",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, "💤 **لا توجد أي أهداف مستهدفة حالياً.**", parse_mode="Markdown")
     return
-
   text = "🎯 **قائمة الأهداف المشتعلة حالياً:**\n\n"
   for uid in aCtive.keys():
     text += f"🔥 `الآيدي : {uid}`\n"
@@ -772,112 +750,63 @@ def cmd_spam(message):
   if len(parts) < 2:
     bot.reply_to(
         message,
-        "⚠️ **خطأ في الاستخدام:** يرجى كتابة الآيدي بالشكل الصحيح:\n`/spam <UID>`",
+        "⚠️ **خطأ في الاستخدام:** `/spam <UID>`",
         parse_mode="Markdown",
     )
     return
-
   uid = parts[1].strip()
-  start_spam_process(message, uid)
-
-
-def start_spam_process(message, uid):
   if not uid.isdigit():
-    bot.reply_to(
-        message, "❌ **خطأ:** عذراً، آيدي اللاعب يجب أن يكون أرقاماً فقط!"
-    )
+    bot.reply_to(message, "❌ **خطأ:** الآيدي يجب أن يكون أرقاماً فقط!")
     return
-
   if uid in aCtive:
-    bot.reply_to(
-        message,
-        f"⚠️ **تنبيه:** الآيدي `{uid}` تحت الهجوم الفائق بالفعل حالياً!",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, f"⚠️ **تنبيه:** الآيدي `{uid}` تحت الهجوم بالفعل!", parse_mode="Markdown")
     return
-
   if not aCcs:
-    bot.reply_to(
-        message,
-        "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ أو غير موجود!",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ!", parse_mode="Markdown")
     return
 
-  wait_msg = bot.reply_to(
-      message,
-      f"🔍 **جاري فحص وجلب بيانات اللاعب `{uid}` وبدء الهجوم الخارق...**",
-      parse_mode="Markdown",
-  )
-
-  player_name = "مقاتل مجهول"
+  wait_msg = bot.reply_to(message, f"🔍 **جاري فحص وبدء الهجوم للآيدي `{uid}`...**", parse_mode="Markdown")
+  player_name = "مقاتل فري فاير"
   try:
     first_uid = list(aCcs.keys())[0]
     if first_uid not in tOkens:
       tOkens[first_uid] = gJ(first_uid, aCcs[first_uid])
     player_name = fetch_player_info(tOkens[first_uid], uid)
   except:
-    player_name = "مقاتل فري فاير (الآيدي صحيح)"
+    pass
 
   ev = threading.Event()
   aCtive[uid] = ev
   threading.Thread(target=sPam, args=(uid,), daemon=True).start()
   save_targets_to_file()
 
-  success_text = (
-      f"🚀 **تم إطلاق الهجوم الفائق بنجاح تام!**\n\n"
-      f"👤 **اسم اللاعب:** `{player_name}`\n"
-      f"🎯 **الآيدي المستهدف:** `{uid}`\n"
-      f"🔥 **الحالة:** مئات الطلبات تُرسل الآن بلا توقف من كافة الحسابات!"
-  )
-
   try:
     bot.edit_message_text(
-        success_text,
+        (
+            "🚀 **تم إطلاق الهجوم بنجاح تام!**\n\n👤 **الاسم:**"
+            f" `{player_name}`\n🎯 **الآيدي:** `{uid}`"
+        ),
         chat_id=message.chat.id,
         message_id=wait_msg.message_id,
         parse_mode="Markdown",
     )
   except:
-    bot.reply_to(message, success_text, parse_mode="Markdown")
+    bot.reply_to(message, f"🚀 **تم بدء الهجوم على الآيدي:** `{uid}`", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["stop"])
 def cmd_stop(message):
   parts = message.text.split()
   if len(parts) < 2:
-    bot.reply_to(
-        message,
-        "⚠️ **خطأ في الاستخدام:** يرجى كتابة الآيدي المراد إيقافه هكذا:\n`/stop <UID>`",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, "⚠️ **خطأ:** `/stop <UID>`", parse_mode="Markdown")
     return
-
   uid = parts[1].strip()
-  stop_spam_process(message, uid)
-
-
-def stop_spam_process(message, uid):
-  if not uid.isdigit():
-    bot.reply_to(
-        message, "❌ **خطأ:** عذراً، الآيدي يجب أن يكون أرقاماً فقط!"
-    )
-    return
-
   if uid in aCtive:
     aCtive[uid].set()
     save_targets_to_file()
-    bot.reply_to(
-        message,
-        f"🛑 **تم إيقاف الهجوم بنجاح وتأمين السيرفر!**\n\n🎯 **الهدف المتوقف:** `{uid}`",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown")
   else:
-    bot.reply_to(
-        message,
-        f"⚠️ **تنبيه:** الآيدي `{uid}` ليس عليه أي هجوم نشط حالياً.",
-        parse_mode="Markdown",
-    )
+    bot.reply_to(message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown")
 
 
 # ==================== مسارات الـ Flask ====================
@@ -888,39 +817,34 @@ app = Flask(__name__)
 def sTart():
   uid = request.args.get("user_id", "").strip()
   if not uid:
-    return (
-        jsonify({"status": False, "msg": "UID required", "DEV": "skip"}),
-        400,
-    )
+    return jsonify({"status": False, "msg": "UID required"}), 400
   if uid in aCtive:
-    return jsonify({"status": True, "msg": "Already spamming", "DEV": "skip"})
+    return jsonify({"status": True, "msg": "Already spamming"})
   ev = threading.Event()
   aCtive[uid] = ev
   threading.Thread(target=sPam, args=(uid,), daemon=True).start()
   save_targets_to_file()
-  return jsonify(
-      {"status": True, "msg": "Turbo Attack Started Successfully", "DEV": "skip"}
-  )
+  return jsonify({"status": True, "msg": "Turbo Attack Started"})
 
 
 @app.get("/stop")
 def sTop():
   uid = request.args.get("user_id", "").strip()
-  if not uid:
-    return (
-        jsonify({"status": False, "msg": "UID required", "DEV": "skip"}),
-        400,
-    )
   if uid in aCtive:
     aCtive[uid].set()
     save_targets_to_file()
-    return jsonify({"status": True, "msg": "Attack Stopped", "DEV": "skip"})
-  return jsonify({"status": False, "msg": "Target not found", "DEV": "skip"})
+    return jsonify({"status": True, "msg": "Attack Stopped"})
+  return jsonify({"status": False, "msg": "Target not found"})
 
 
 def run_telegram_bot():
-  print("🚀 Turbo Telegram Bot is running live with Skip modifications...")
-  bot.infinity_polling()
+  print("🚀 Turbo Telegram Bot is running live...")
+  while True:
+    try:
+      bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
+    except Exception as e:
+      print(f"Telegram polling error: {e}")
+      time.sleep(3)
 
 
 if __name__ == "__main__":
@@ -928,6 +852,5 @@ if __name__ == "__main__":
     print("❌ خطأ: التوكن غير موجود. يرجى ضبطه أولاً.")
   else:
     restore_targets()
-    t = threading.Thread(target=run_telegram_bot, daemon=True)
-    t.start()
-    app.run(debug=False, host="0.0.0.0", port=5000)
+    threading.Thread(target=run_telegram_bot, daemon=True).start()
+    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
