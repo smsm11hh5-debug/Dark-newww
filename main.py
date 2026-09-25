@@ -742,6 +742,20 @@ def run_telegram_bot():
 
 
 if __name__ == "__main__":
-  restore_targets()
-  threading.Thread(target=run_telegram_bot, daemon=True).start()
-  app.run(host="0.0.0.0", port=5000)
+  try:
+    print("🔄 جاري استعادة الأهداف...")
+    restore_targets()
+  except Exception as e:
+    print(f"Error in restore_targets: {e}")
+
+  try:
+    print("🤖 جاري تشغيل بوت التليجرام...")
+    threading.Thread(target=run_telegram_bot, daemon=True).start()
+  except Exception as e:
+    print(f"Error starting telegram bot: {e}")
+
+  # قراءة المنفذ المخصص من منصة Railway أو استخدام 5000 محلياً
+  port = int(os.environ.get("PORT", 5000))
+  print(f"🌐 جاري تشغيل سيرفر Flask على المنفذ {port}...")
+  app.run(host="0.0.0.0", port=port)
+
