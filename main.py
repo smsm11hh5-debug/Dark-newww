@@ -580,8 +580,8 @@ aCtive = {}
 tOkens = {}
 
 
-# ==================== محرك الإرسال فائق السرعة اللحظي ====================
-def worker_task(uid, pw, tgt, ev):
+# ==================== محرك الإرسال (تفعيل كافة الحسابات معاً) ====================
+def single_account_worker(uid, pw, tgt, ev):
   global tOkens
   while not ev.is_set():
     try:
@@ -598,23 +598,25 @@ def worker_task(uid, pw, tgt, ev):
         REQUEST_STATS["total_sent"] += 1
     except:
       tOkens.pop(uid, None)
-    # إرسال متواصل ومكثف بدون أي فواصل أو تأخير
 
 
 def sPam(tgt):
   ev = aCtive.get(tgt)
   if not ev:
     return
-  # تشغيل الحسابات كحلقة لا نهائية متوازية وبأقصى عدد للـ Threads
-  with ThreadPoolExecutor(max_workers=max(5, len(aCcs) * 2)) as executor:
-    futures = [
-        executor.submit(worker_task, uid, pw, tgt, ev)
-        for uid, pw in aCcs.items()
-    ]
-    while not ev.is_set():
-      time.sleep(0.1)
-    for f in futures:
-      f.cancel()
+
+  # تخصيص خيط (Thread) خاص ومستقل لكل حساب في الملف ليعملوا جميعاً في نفس اللحظة
+  threads = []
+  for uid, pw in aCcs.items():
+    t = threading.Thread(
+        target=single_account_worker, args=(uid, pw, tgt, ev), daemon=True
+    )
+    threads.append(t)
+    t.start()
+
+  while not ev.is_set():
+    time.sleep(0.1)
+
   aCtive.pop(tgt, None)
   save_targets_to_file()
 
@@ -641,7 +643,7 @@ def send_welcome(message):
   help_text = (
       "⚡ **لوحة السيطرة والدمار الشامل (SKIP ULTRA PANEL)** 🔥\n\n"
       "🚀 **قائمة الأوامر السريعة:**\n"
-      "🎯 `/spam <UID>` - إطلاق الهجوم فائق السرعة بكل الحسابات\n"
+      "🎯 `/spam <UID>` - إطلاق الهجوم بجميع الحسابات معاً\n"
       "🛑 `/stop <UID>` - إيقاف الهجوم عن الآيدي فوراً\n"
       "📊 `/speed` - عرض عدد الطلبات المرسلة وسرعة الخادم\n"
       "📋 `/status` - عرض الأهداف المشتعلة حالياً\n"
@@ -689,8 +691,8 @@ def cmd_speed(message):
       message,
       (
           "🚀 **مؤشر السرعة والأداء اللحظي:**\n\n🔥 **إجمالي الطلبات المرسلة"
-          f" للهدف:** `{total}` طلب ناجح\n⚡ **معدل الإرسال:** فائق السرعة"
-          f" (Zero-Delay)\n👥 **الحسابات النشطة:** `{len(aCcs)}`"
+          f" للهدف:** `{total}` طلب ناجح\n⚡ **الحسابات المشاركة:** جميع"
+          f" الحسابات (`{len(aCcs)}` حساب)"
       ),
       parse_mode="Markdown",
   )
@@ -702,7 +704,7 @@ def cmd_dev(message):
       message,
       (
           "👑 **معلومات المطور:**\n\n👤 **المطور:** skip\n🔥 **الإصدار:** Ultra"
-          " Turbo v4.1"
+          " Turbo v4.2"
       ),
       parse_mode="Markdown",
   )
@@ -726,8 +728,8 @@ def cmd_accounts(message):
   bot.reply_to(
       message,
       (
-          "📊 **إحصائيات الحسابات:**\n\n📂 **إجمالي الحسابات:**"
-          f" `{len(aCcs)}`\n🟢 **المفعلة والجاهزة:** `{len(tOkens)}`"
+          "📊 **إحصائيات الحسابات:**\n\n📂 **إجمالي الحسابات في الملف:**"
+          f" `{len(aCcs)}`\n🟢 **المفعلة والجاهزة للإرسال:** `{len(tOkens)}`"
       ),
       parse_mode="Markdown",
   )
@@ -765,7 +767,7 @@ def cmd_spam(message):
     bot.reply_to(message, "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ!", parse_mode="Markdown")
     return
 
-  wait_msg = bot.reply_to(message, f"🔍 **جاري فحص وبدء الهجوم للآيدي `{uid}`...**", parse_mode="Markdown")
+  wait_msg = bot.reply_to(message, f"🔍 **جاري تشغيل كافة الحسابات للآيدي `{uid}`...**", parse_mode="Markdown")
   player_name = "مقاتل فري فاير"
   try:
     first_uid = list(aCcs.keys())[0]
@@ -783,15 +785,16 @@ def cmd_spam(message):
   try:
     bot.edit_message_text(
         (
-            "🚀 **تم إطلاق الهجوم بنجاح تام!**\n\n👤 **الاسم:**"
-            f" `{player_name}`\n🎯 **الآيدي:** `{uid}`"
+            "🚀 **تم إطلاق الهجوم بكافة الحسابات بنجاح!**\n\n👤 **الاسم:**"
+            f" `{player_name}`\n🎯 **الآيدي:** `{uid}`\n👥 **عدد الحسابات"
+            f" المستخدمة:** `{len(aCcs)}`"
         ),
         chat_id=message.chat.id,
         message_id=wait_msg.message_id,
         parse_mode="Markdown",
     )
   except:
-    bot.reply_to(message, f"🚀 **تم بدء الهجوم على الآيدي:** `{uid}`", parse_mode="Markdown")
+    bot.reply_to(message, f"🚀 **تم بدء الهجوم الشامل على الآيدي:** `{uid}`", parse_mode="Markdown")
 
 
 @bot.message_handler(commands=["stop"])
