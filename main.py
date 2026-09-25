@@ -1,4 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import os
@@ -29,35 +28,11 @@ except Exception as e:
   print(f"Error reading config.json: {e}")
 
 if not TELEGRAM_TOKEN:
-  print("⚠️ تنبيه: توكن البوت مفقود، تأكد من ملف config.json أو متغيرات البيئة!")
+  print("❌ تحذير: توكن التليجرام غير موجود في ملف config.json أو البيئة!")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# ==================== نظام حفظ الأهداف ====================
-TARGETS_FILE = "active_targets.json"
-REQUEST_STATS = {"total_sent": 0}
-stats_lock = threading.Lock()
-
-
-def load_saved_targets():
-  if os.path.exists(TARGETS_FILE):
-    try:
-      with open(TARGETS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-    except:
-      return []
-  return []
-
-
-def save_targets_to_file():
-  try:
-    with open(TARGETS_FILE, "w", encoding="utf-8") as f:
-      json.dump(list(aCtive.keys()), f)
-  except:
-    pass
-
-
-# ==================== التشفير والدوال الأساسية ====================
+# ==================== شفرات وحماية فري فاير ====================
 k = b"Yg&tc%DEuh6%Zc^8"
 iv = b"6oyZDr22E3ychjM%"
 
@@ -65,6 +40,11 @@ iv = b"6oyZDr22E3ychjM%"
 def eNc(d):
   cipher = AES.new(k, AES.MODE_CBC, iv)
   return cipher.encrypt(pad(d, AES.block_size))
+
+
+def dEc(d):
+  cipher = AES.new(k, AES.MODE_CBC, iv)
+  return unpad(cipher.decrypt(d), AES.block_size)
 
 
 def pB(d):
@@ -96,6 +76,16 @@ def pB(d):
         out[str(fn)] = {"t": "str", "v": v.decode()}
       except:
         out[str(fn)] = {"t": "hex", "v": v.hex()}
+    elif wt == 1:
+      if i + 8 > len(d):
+        break
+      out[str(fn)] = {"t": "64b", "v": d[i : i + 8].hex()}
+      i += 8
+    elif wt == 5:
+      if i + 4 > len(d):
+        break
+      out[str(fn)] = {"t": "32b", "v": d[i : i + 4].hex()}
+      i += 4
     else:
       break
   return out
@@ -422,7 +412,7 @@ def gT(uid, pw):
           "client_id": "100067",
       },
       verify=False,
-      timeout=10,
+      timeout=15,
   )
   if r.status_code != 200:
     raise Exception(f"garena {r.status_code}")
@@ -500,7 +490,7 @@ def gJ(uid, pw):
       },
       data=pay,
       verify=False,
-      timeout=15,
+      timeout=20,
   )
   if r.status_code != 200:
     raise Exception(f"MajorLogin {r.status_code}")
@@ -528,29 +518,6 @@ def hDr(tok):
   }
 
 
-def fetch_player_info(jwt, to):
-  try:
-    raw = "08c8b5cfea1810" + eI(to) + "18012008"
-    data = bytes.fromhex(eNc(bytes.fromhex(raw)).hex())
-    r = requests.post(
-        f"{sRv}/GetPlayerPersonalCard",
-        headers=hDr(jwt),
-        data=data,
-        verify=False,
-        timeout=3,
-    )
-    if r.status_code == 200:
-      parsed = pB(r.content)
-      for key in parsed:
-        if parsed[key].get("t") == "str" and len(parsed[key].get("v", "")) > 1:
-          val = parsed[key]["v"]
-          if not val.startswith("http"):
-            return val
-  except:
-    pass
-  return "مقاتل فري فاير"
-
-
 def aF(jwt, to):
   raw = "08c8b5cfea1810" + eI(to) + "18012008"
   data = bytes.fromhex(eNc(bytes.fromhex(raw)).hex())
@@ -564,7 +531,7 @@ def aF(jwt, to):
   return r.status_code
 
 
-# ==================== قراءة الحسابات ====================
+# ==================== إدارة الحسابات ====================
 aCcs = {}
 try:
   with open("accs.txt", "r", encoding="utf-8") as f:
@@ -580,264 +547,188 @@ aCtive = {}
 tOkens = {}
 
 
-# ==================== محرك الإرسال (سريع وبدون وقت انتظار كبير) ====================
-def single_account_worker(uid, pw, tgt, ev):
-  global tOkens
-  while not ev.is_set():
-    try:
-      if uid not in tOkens:
-        tOkens[uid] = gJ(uid, pw)
-      jwt = tOkens[uid]
-      code = aF(jwt, tgt)
-
-      if code in (401, 403):
-        tOkens[uid] = gJ(uid, pw)
-        jwt = tOkens[uid]
-        aF(jwt, tgt)
-      elif code == 429:
-        time.sleep(1.0)
-
-      with stats_lock:
-        REQUEST_STATS["total_sent"] += 1
-
-      # سرعة عالية جداً بدون فترات انتظار طويلة
-      time.sleep(0.05)
-    except:
-      tOkens.pop(uid, None)
-      time.sleep(0.5)
-
-
 def sPam(tgt):
-  ev = aCtive.get(tgt)
-  if not ev:
-    return
-
-  max_workers = min(len(aCcs), 40)
-  with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    futures = [
-        executor.submit(single_account_worker, uid, pw, tgt, ev)
-        for uid, pw in aCcs.items()
-    ]
-
-    while not ev.is_set():
-      time.sleep(0.5)
-
-    for f in futures:
-      f.cancel()
-
+  ev = aCtive[tgt]
+  while not ev.is_set():
+    for uid, pw in aCcs.items():
+      if ev.is_set():
+        break
+      try:
+        if uid not in tOkens:
+          tOkens[uid] = gJ(uid, pw)
+        jwt = tOkens[uid]
+        code = aF(jwt, tgt)
+        if code in (401, 403):
+          tOkens.pop(uid, None)
+      except:
+        tOkens.pop(uid, None)
+    time.sleep(0.01)
   aCtive.pop(tgt, None)
-  save_targets_to_file()
 
 
-def restore_targets():
-  saved_list = load_saved_targets()
-  for uid in saved_list:
-    if uid not in aCtive:
-      ev = threading.Event()
-      aCtive[uid] = ev
-      threading.Thread(target=sPam, args=(uid,), daemon=True).start()
-  if saved_list:
-    print(
-        f"⚡ تم استعادة واستئناف الهجوم للآيدات النشطة لـ {len(saved_list)} أهداف"
-        " بنجاح!"
-    )
-
-
-# ==================== الأوامر والواجهة ====================
+# ==================== الأوامر المطورة (بإختصارات جديدة) ====================
 
 
 @bot.message_handler(commands=["start", "help"])
 def send_welcome(message):
   hide_keyboard = types.ReplyKeyboardRemove()
   help_text = (
-      "⚡ **لوحة السيطرة السريعة (ULTRA SPEED PANEL)** 🔥\n\n"
-      "🚀 **قائمة الأوامر السريعة:**\n"
-      "🎯 `/spam <UID>` - إطلاق الهجوم السريع بجميع الحسابات\n"
-      "🛑 `/stop <UID>` - إيقاف الهجوم عن الآيدي فوراً\n"
-      "📊 `/speed` - عرض عدد الطلبات المرسلة وسرعة الخادم\n"
-      "📋 `/status` - عرض الأهداف المشتعلة حالياً\n"
-      "📂 `/accounts` - عدد الحسابات وجاهزيتها\n"
-      "📶 `/ping` - قياس البينج الحقيقي للسيرفر\n"
-      "👑 `/dev` - معلومات المطور\n"
-      "🔄 `/restart` - تنظيف الذاكرة وتصفير النظام"
+      "⚡ **NEXUS SPAM SYSTEM — SKIP** 🏴‍☠️\n\n"
+      "┏━━━━━━━━━━━━━━━━━━━━┓\n"
+      "  🛸 **لوحة التحكم السريعة**\n"
+      "┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
+      "🚀 `/sp <UID>` ⟵ بدء الهجوم على الآيدي\n"
+      "🛑 `/st <UID>` ⟵ إيقاف الهجوم عن الآيدي\n"
+      "📊 `/stt` ⟵ عرض الأهداف والعمليات النشطة\n"
+      "👥 `/ac` ⟵ تقرير حالة حسابات السبام\n"
+      "🔍 `/accs` ⟵ فحص ملف الحسابات السريع\n"
+      "⚡ `/pn` ⟵ فحص استجابة السيرفر والنظام\n\n"
+      "💎 **Developer:** `skip`"
   )
-  bot.reply_to(
-      message, help_text, reply_markup=hide_keyboard, parse_mode="Markdown"
-  )
+  bot.reply_to(message, help_text, reply_markup=hide_keyboard, parse_mode="Markdown")
 
 
-@bot.message_handler(commands=["ping"])
+@bot.message_handler(commands=["pn"])
 def cmd_ping(message):
-  start_time = time.time()
-  msg = bot.reply_to(
-      message,
-      "📡 **جاري قياس البينج الحقيقي وسرعة الاستجابة...**",
-      parse_mode="Markdown",
-  )
-  latency = int((time.time() - start_time) * 1000)
-  try:
-    api_p_start = time.time()
-    requests.get(sRv, timeout=2, verify=False)
-    api_latency = int((time.time() - api_p_start) * 1000)
-  except:
-    api_latency = "غير متصل"
-
-  bot.edit_message_text(
-      (
-          "📶 **تقرير مؤشر السرعة الحقيقي:**\n\n🤖 **استجابة البوت (Telegram):**"
-          f" `{latency} ms`\n🌐 **استجابة سيرفر اللعبة (API):** `{api_latency}"
-          " ms`\n⚡ **الحالة:** السرعة القصوى مفعلة!"
-      ),
-      chat_id=message.chat.id,
-      message_id=msg.message_id,
-      parse_mode="Markdown",
-  )
-
-
-@bot.message_handler(commands=["speed"])
-def cmd_speed(message):
-  with stats_lock:
-    total = REQUEST_STATS["total_sent"]
   bot.reply_to(
       message,
-      (
-          "🚀 **مؤشر السرعة والأداء اللحظي:**\n\n🔥 **إجمالي الطلبات المرسلة"
-          f" للهدف:** `{total}` طلب ناجح\n⚡ **الحسابات المشاركة:** جميع"
-          f" الحسابات (`{len(aCcs)}` حساب)"
-      ),
+      "⚡ **[SYSTEM STATUS]**\n🌐 السيرفر يعمل بأعلى كفاءة وسرعة فائقة! 🚀\n👑 **Dev:** `skip`",
       parse_mode="Markdown",
   )
 
 
-@bot.message_handler(commands=["dev"])
-def cmd_dev(message):
-  bot.reply_to(
-      message,
-      "👑 **معلومات المطور:**\n\n👤 **المطور:** Ultra Speed Engine",
-      parse_mode="Markdown",
-  )
-
-
-@bot.message_handler(commands=["restart"])
-def cmd_restart_bot(message):
-  aCtive.clear()
-  tOkens.clear()
-  if os.path.exists(TARGETS_FILE):
-    os.remove(TARGETS_FILE)
-  bot.reply_to(
-      message,
-      "🔄 **تم إعادة تشغيل وتصفير النظام بالكامل!**",
-      parse_mode="Markdown",
-  )
-
-
-@bot.message_handler(commands=["accounts"])
+@bot.message_handler(commands=["ac"])
 def cmd_accounts(message):
-  bot.reply_to(
-      message,
-      (
-          "📊 **إحصائيات الحسابات:**\n\n📂 **إجمالي الحسابات في الملف:**"
-          f" `{len(aCcs)}`\n🟢 **المفعلة والجاهزة للإرسال:** `{len(tOkens)}`"
-      ),
-      parse_mode="Markdown",
+  total_accs = len(aCcs)
+  connected_accs = len([uid for uid in aCcs if uid in tOkens])
+  disconnected_accs = total_accs - connected_accs
+
+  text = (
+      "📊 **تقرير حالة الحسابات المتطورة:**\n\n"
+      f"📂 **إجمالي الحسابات:** `{total_accs}`\n"
+      f"🟢 **الحسابات النشطة (متصلة):** `{connected_accs}`\n"
+      f"🔴 **الحسابات غير المتصلة:** `{disconnected_accs}`\n\n"
+      "💠 **System Protection:** `skip`"
   )
-
-
-@bot.message_handler(commands=["status"])
-def cmd_status(message):
-  if not aCtive:
-    bot.reply_to(
-        message, "💤 **لا توجد أي أهداف مستهدفة حالياً.**", parse_mode="Markdown"
-    )
-    return
-  text = "🎯 **قائمة الأهداف المشتعلة حالياً:**\n\n"
-  for uid in aCtive.keys():
-    text += f"🔥 `الآيدي : {uid}`\n"
   bot.reply_to(message, text, parse_mode="Markdown")
 
 
-@bot.message_handler(commands=["spam"])
+@bot.message_handler(commands=["accs"])
+def cmd_check_accs_file(message):
+  file_exists = os.path.exists("accs.txt")
+  size = os.path.getsize("accs.txt") if file_exists else 0
+  text = (
+      "📂 **فحص ملف الحسابات (`accs.txt`):**\n\n"
+      f"📁 الحالة: `{'متوفر ✅' if file_exists else 'غير متوفر ❌'}`\n"
+      f"📊 الحجم: `{size} bytes`\n"
+      f"🔢 عدد الأسطر المقروءة: `{len(aCcs)} حساب`\n\n"
+      "🛡️ **Powered by:** `skip`"
+  )
+  bot.reply_to(message, text, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["stt"])
+def cmd_status(message):
+  if not aCtive:
+    bot.reply_to(
+        message,
+        "💤 **النظام هادئ:** لا توجد أي عمليات هجوم أو سبام نشطة حالياً.",
+        parse_mode="Markdown",
+    )
+    return
+
+  text = "🛰️ **العمليات والأهداف النشطة حالياً:**\n\n"
+  for uid in aCtive.keys():
+    text += f"🎯 `Target UID : {uid}`\n"
+  text += "\n👑 **Control:** `skip`"
+  bot.reply_to(message, text, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["sp"])
 def cmd_spam(message):
   parts = message.text.split()
   if len(parts) < 2:
     bot.reply_to(
         message,
-        "⚠️ **خطأ في الاستخدام:** `/spam <UID>`",
+        "⚠️ **خطأ في الصيغة:**\nاستخدم الاختصار بالشكل التالي:\n`/sp <UID>`",
         parse_mode="Markdown",
-    )
-    return
-  uid = parts[1].strip()
-  if not uid.isdigit():
-    bot.reply_to(message, "❌ **خطأ:** الآيدي يجب أن يكون أرقاماً فقط!")
-    return
-  if uid in aCtive:
-    bot.reply_to(
-        message,
-        f"⚠️ **تنبيه:** الآيدي `{uid}` تحت الهجوم بالفعل!",
-        parse_mode="Markdown",
-    )
-    return
-  if not aCcs:
-    bot.reply_to(
-        message, "❌ **خطأ:** ملف الحسابات `accs.txt` فارغ!", parse_mode="Markdown"
     )
     return
 
-  wait_msg = bot.reply_to(
-      message,
-      f"🔍 **جاري فحص وتشغيل الحسابات بسرعة عالية للآيدي `{uid}`...**",
-      parse_mode="Markdown",
-  )
-  player_name = "مقاتل فري فاير"
-  try:
-    first_uid = list(aCcs.keys())[0]
-    if first_uid not in tOkens:
-      tOkens[first_uid] = gJ(first_uid, aCcs[first_uid])
-    player_name = fetch_player_info(tOkens[first_uid], uid)
-  except:
-    pass
+  uid = parts[1].strip()
+  start_spam_process(message, uid)
+
+
+def start_spam_process(message, uid):
+  if not uid.isdigit():
+    bot.reply_to(
+        message,
+        "❌ **خطأ تقني:** الآيدي المستهدف يجب أن يتكون من أرقام صحيحة فقط!",
+    )
+    return
+
+  if uid in aCtive:
+    bot.reply_to(
+        message,
+        f"⚠️ **تنبيه:** الآيدي `{uid}` يتعرض لهجوم السبام بالفعل!",
+        parse_mode="Markdown",
+    )
+    return
+
+  if not aCcs:
+    bot.reply_to(
+        message,
+        "❌ **خطأ حرج:** ملف الحسابات `accs.txt` فارغ أو تالف!",
+        parse_mode="Markdown",
+    )
+    return
 
   ev = threading.Event()
   aCtive[uid] = ev
   threading.Thread(target=sPam, args=(uid,), daemon=True).start()
-  save_targets_to_file()
-
-  try:
-    bot.edit_message_text(
-        (
-            "🚀 **تم بدء الهجوم السارق والطلقات المتتالية بكافة الحسابات"
-            f" بنجاح!**\n\n👤 **الاسم:** `{player_name}`\n🎯 **الآيدي:**"
-            f" `{uid}`\n👥 **عدد الحسابات المستخدمة:** `{len(aCcs)}`"
-        ),
-        chat_id=message.chat.id,
-        message_id=wait_msg.message_id,
-        parse_mode="Markdown",
-    )
-  except:
-    bot.reply_to(
-        message,
-        f"🚀 **تم بدء الهجوم السريع على الآيدي:** `{uid}`",
-        parse_mode="Markdown",
-    )
+  bot.reply_to(
+      message,
+      f"🚀 **تم إطلاق هجوم السبام بنجاح!**\n\n🎯 **الهدف:** `{uid}`\n👑"
+      " **Developer:** `skip`",
+      parse_mode="Markdown",
+  )
 
 
-@bot.message_handler(commands=["stop"])
+@bot.message_handler(commands=["st"])
 def cmd_stop(message):
   parts = message.text.split()
   if len(parts) < 2:
-    bot.reply_to(message, "⚠️ **خطأ:** `/stop <UID>`", parse_mode="Markdown")
+    bot.reply_to(
+        message,
+        "⚠️ **خطأ في الصيغة:**\nاستخدم الاختصار بالشكل التالي:\n`/st <UID>`",
+        parse_mode="Markdown",
+    )
     return
+
   uid = parts[1].strip()
+  stop_spam_process(message, uid)
+
+
+def stop_spam_process(message, uid):
+  if not uid.isdigit():
+    bot.reply_to(
+        message, "❌ **خطأ تقني:** الآيدي يجب أن يتكون من أرقام صحيحة فقط!"
+    )
+    return
 
   if uid in aCtive:
     aCtive[uid].set()
-    save_targets_to_file()
     bot.reply_to(
-        message, f"🛑 **تم إيقاف الهجوم عن الآيدي:** `{uid}`", parse_mode="Markdown"
+        message,
+        f"🛑 **تم إيقاف الهجوم بنجاح!**\n\n🎯 **الهدف:** `{uid}`\n🛡️"
+        " **Developer:** `skip`",
+        parse_mode="Markdown",
     )
   else:
     bot.reply_to(
-        message, f"⚠️ **الآيدي `{uid}` ليس عليه هجوم نشط.**", parse_mode="Markdown"
+        message,
+        f"⚠️ **تنبيه:** الآيدي `{uid}` ليس قيد الهجوم أصلاً.",
+        parse_mode="Markdown",
     )
 
 
@@ -849,40 +740,53 @@ app = Flask(__name__)
 def sTart():
   uid = request.args.get("user_id", "").strip()
   if not uid:
-    return jsonify({"status": False, "msg": "UID required"}), 400
+    return (
+        jsonify(
+            {
+                "status": False,
+                "msg": "UID required",
+                "DEV": "skip",
+            }
+        ),
+        400,
+    )
   if uid in aCtive:
-    return jsonify({"status": True, "msg": "Already spamming"})
+    return jsonify({"status": True, "msg": "Already spamming", "DEV": "skip"})
   ev = threading.Event()
   aCtive[uid] = ev
   threading.Thread(target=sPam, args=(uid,), daemon=True).start()
-  save_targets_to_file()
-  return jsonify({"status": True, "msg": "Ultra Turbo Attack Started"})
+  return jsonify({"status": True, "msg": "Success", "DEV": "skip"})
 
 
 @app.get("/stop")
 def sTop():
   uid = request.args.get("user_id", "").strip()
+  if not uid:
+    return (
+        jsonify(
+            {
+                "status": False,
+                "msg": "UID required",
+                "DEV": "skip",
+            }
+        ),
+        400,
+    )
   if uid in aCtive:
     aCtive[uid].set()
-    save_targets_to_file()
-    return jsonify({"status": True, "msg": "Attack Stopped"})
-  return jsonify({"status": False, "msg": "Target not found"})
+    return jsonify({"status": True, "msg": "Stopping", "DEV": "skip"})
+  return jsonify({"status": False, "msg": "Not spamming", "DEV": "skip"})
 
 
 def run_telegram_bot():
-  print("🚀 Ultra Speed Telegram Bot is running live...")
-  while True:
-    try:
-      bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
-    except Exception as e:
-      print(f"Telegram polling error: {e}")
-      time.sleep(3)
+  print("Telegram Bot is running with sleek skip UI...")
+  bot.infinity_polling()
 
 
 if __name__ == "__main__":
   if not TELEGRAM_TOKEN:
-    print("❌ خطأ: التوكن غير موجود. يرجى ضبطه أولاً.")
+    print("❌ خطأ: التوكن غير موجود. تأكد من إعداد الملفات قبل التشغيل.")
   else:
-    restore_targets()
-    threading.Thread(target=run_telegram_bot, daemon=True).start()
-    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    t = threading.Thread(target=run_telegram_bot, daemon=True)
+    t.start()
+    app.run(debug=False, host="0.0.0.0", port=5000)
